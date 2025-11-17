@@ -2,7 +2,6 @@ package dht
 
 import (
 	"container/ring"
-	"context"
 	"math"
 	"sync"
 	"time"
@@ -58,7 +57,7 @@ func (dht *DHT) runAnnouncer() {
 		defer dht.grp.Done()
 		limiter := rate.NewLimiter(rate.Limit(dht.conf.AnnounceRate), dht.conf.AnnounceRate)
 		for {
-			err := limiter.Wait(context.Background()) // TODO: should use grp.ctx somehow? so when grp is closed, wait returns
+			err := limiter.Wait(dht.grp.Context())
 			if err != nil {
 				log.Error(errors.Prefix("rate limiter", err))
 				continue
@@ -122,7 +121,6 @@ func (dht *DHT) runAnnouncer() {
 			}
 
 		case <-announceNextHash:
-			dht.grp.Add(1)
 			ht := queue.Value.(hashAndTime)
 
 			if !ht.lastAnnounce.IsZero() {
@@ -133,6 +131,8 @@ func (dht *DHT) runAnnouncer() {
 					continue
 				}
 			}
+
+			dht.grp.Add(1)
 
 			if dht.conf.AnnounceNotificationCh != nil {
 				dht.conf.AnnounceNotificationCh <- announceNotification{
