@@ -61,6 +61,11 @@ func (s *Group) Ch() Chan {
 	return s.ctx.Done()
 }
 
+// Context returns the context associated with this stop group.
+func (s *Group) Context() context.Context {
+	return s.ctx
+}
+
 // Stop signals any listening processes to stop. After the first call, Stop() does nothing.
 func (s *Group) Stop() {
 	s.cancel()

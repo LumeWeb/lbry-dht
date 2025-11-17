@@ -1,7 +1,6 @@
 package dht
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"strconv"
@@ -186,7 +185,7 @@ func (dht *DHT) runRPCServer(port int) {
 	}()
 
 	<-dht.grp.Ch()
-	err = server.Shutdown(context.Background())
+	err = server.Shutdown(dht.grp.Context())
 	if err != nil {
 		log.Error(errors.Prefix("shutting down rpc service", err))
 		return
