@@ -2,6 +2,7 @@ package dht
 
 import (
 	"container/ring"
+	"context"
 	"math"
 	"sync"
 	"time"
@@ -59,8 +60,11 @@ func (dht *DHT) runAnnouncer() {
 		for {
 			err := limiter.Wait(dht.grp.Context())
 			if err != nil {
-				log.Error(errors.Prefix("rate limiter", err))
-				continue
+				// Don't log context cancellation as an error - it's expected during shutdown
+				if !errors.Is(err, context.Canceled) {
+					log.Error(errors.Prefix("rate limiter", err))
+				}
+				return
 			}
 			select {
 			case limitCh <- time.Now():

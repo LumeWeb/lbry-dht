@@ -264,6 +264,30 @@ func TestFindNode(t *testing.T) {
 	verifyContacts(t, contacts, nodes)
 }
 
+// Test new Node methods
+func TestNode_RemoveBadPeer(t *testing.T) {
+	node := NewNode(bits.Rand())
+	contact := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+
+	// Add contact to store first
+	node.Store(bits.Rand(), contact)
+
+	// Remove bad peer - should not panic
+	node.RemoveBadPeer(contact)
+}
+
+func TestNode_RemoveBadPeerFromHash(t *testing.T) {
+	node := NewNode(bits.Rand())
+	contact := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	blobHash := bits.Rand()
+
+	// Add contact to store first
+	node.Store(blobHash, contact)
+
+	// Remove bad peer from specific hash - should not panic
+	node.RemoveBadPeerFromHash(blobHash, contact)
+}
+
 func TestFindValueExisting(t *testing.T) {
 	dhtNodeID := bits.Rand()
 	testNodeID := bits.Rand()

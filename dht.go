@@ -2,7 +2,9 @@ package dht
 
 import (
 	"fmt"
+	"math/big"
 	"net"
+	"sort"
 	"strings"
 	"time"
 
@@ -198,6 +200,127 @@ func (dht *DHT) PrintState() {
 
 func (dht DHT) ID() bits.Bitmap {
 	return dht.contact.ID
+}
+
+// GetNode returns the internal node pointer
+func (dht *DHT) GetNode() *Node {
+	return dht.node
+}
+
+// GetRoutingTable returns the internal routing table pointer
+func (dht *DHT) GetRoutingTable() *routingTable {
+	return dht.node.rt
+}
+
+// GetContacts returns all contacts from the routing table
+func (dht *DHT) GetContacts() []Contact {
+	return dht.node.rt.GetAllContacts()
+}
+
+// FindContacts finds contacts for the given target using the DHT discovery mechanism
+func (dht *DHT) FindContacts(target bits.Bitmap, findValue bool) ([]Contact, bool, error) {
+	return FindContacts(dht.node, target, findValue, dht.grp.Child())
+}
+
+// ExploreKeyspace systematically explores the keyspace around a target using iterative approach
+func (dht *DHT) ExploreKeyspace(target bits.Bitmap) ([]Contact, error) {
+	return dht.ExploreKeyspaceWithLimit(target, 1000)
+}
+
+// ExploreKeyspaceWithLimit systematically explores the keyspace around a target using iterative approach with a configurable iteration limit
+func (dht *DHT) ExploreKeyspaceWithLimit(target bits.Bitmap, maxIterations int) ([]Contact, error) {
+	var allContacts []Contact
+	visited := make(map[bits.Bitmap]bool)
+
+	// Start with the target
+	currentTarget := target
+	factor := 2048
+
+	for i := 0; i < maxIterations; i++ {
+		// Find contacts for current target
+		contacts, _, err := dht.FindContacts(currentTarget, false)
+		if err != nil {
+			return allContacts, err
+		}
+
+		// Add new contacts to our collection
+		for _, contact := range contacts {
+			if !visited[contact.ID] {
+				allContacts = append(allContacts, contact)
+				visited[contact.ID] = true
+			}
+		}
+
+		// If no contacts found, we're done
+		if len(contacts) == 0 {
+			break
+		}
+
+		// Sort contacts by distance from current target
+		sort.Slice(contacts, func(i, j int) bool {
+			return contacts[i].ID.Xor(currentTarget).Cmp(contacts[j].ID.Xor(currentTarget)) < 0
+		})
+
+		// Get the farthest contact
+		farthestContact := contacts[len(contacts)-1]
+		farthestDistance := farthestContact.ID.Xor(currentTarget)
+		currentDistance := target.Xor(currentTarget)
+
+		// If we're not getting closer, adjust the target
+		if farthestDistance.Cmp(currentDistance) <= 0 {
+			// Calculate next jump using the factor approach from Python crawler
+			maxDistance := bits.MaxP()
+			currentDistanceBig := currentDistance.Big()
+			maxDistanceBig := maxDistance.Big()
+
+			// next_jump = current_distance + (max_distance // factor)
+			nextJump := new(big.Int).Div(maxDistanceBig, big.NewInt(int64(factor)))
+			nextJump.Add(nextJump, currentDistanceBig)
+
+			factor /= 2
+			if factor > 8 && nextJump.Cmp(maxDistanceBig) < 0 {
+				// key = int.from_bytes(peer.node_id, 'big') ^ next_jump
+				currentTargetBig := new(big.Int).Xor(dht.node.id.Big(), nextJump)
+				currentTarget = bits.FromBigP(currentTargetBig)
+			} else {
+				break
+			}
+		} else {
+			// Move to the farthest contact
+			currentTarget = farthestContact.ID
+			factor = 2048
+		}
+	}
+
+	return allContacts, nil
+}
+
+// GetRandomTarget generates a random target in the keyspace
+func (dht *DHT) GetRandomTarget() bits.Bitmap {
+	return bits.Rand()
+}
+
+// GetDistanceFromTarget calculates the XOR distance from the node's ID to the target and returns as uint64
+func (dht *DHT) GetDistanceFromTarget(target bits.Bitmap) uint64 {
+	distance := dht.node.id.Xor(target)
+	distanceBig := distance.Big()
+
+	// Convert to uint64, taking the lower 64 bits
+	if distanceBig.BitLen() > 64 {
+		return distanceBig.Uint64()
+	}
+
+	return uint64(distanceBig.Int64())
+}
+
+// RemoveBadPeer removes a peer from all hash mappings when peer is confirmed bad
+func (dht *DHT) RemoveBadPeer(contact Contact) {
+	dht.node.RemoveBadPeer(contact)
+}
+
+// RemoveBadPeerFromHash removes a peer from a specific hash mapping
+func (dht *DHT) RemoveBadPeerFromHash(blobHash bits.Bitmap, contact Contact) {
+	dht.node.RemoveBadPeerFromHash(blobHash, contact)
 }
 
 func getContact(nodeID, addr string) (Contact, error) {
