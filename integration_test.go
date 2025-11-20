@@ -14,7 +14,7 @@ func TestIntegration_RemoveBadPeerWorkflow(t *testing.T) {
 	// Initialize the DHT to set up internal components
 	nodeID := bits.Rand()
 	dht.contact = Contact{ID: nodeID}
-	dht.node = NewNode(nodeID)
+	dht.node = NewNode(nodeID, nil)
 
 	// Create test contacts
 	contact1 := Contact{ID: bits.Rand(), IP: nil, Port: 8080}
@@ -62,7 +62,7 @@ func TestIntegration_GetContactsWorkflow(t *testing.T) {
 	// Initialize the DHT to set up internal components
 	nodeID := bits.Rand()
 	dht.contact = Contact{ID: nodeID}
-	dht.node = NewNode(nodeID)
+	dht.node = NewNode(nodeID, nil)
 
 	// Create test contacts
 	contact1 := Contact{ID: bits.Rand(), IP: nil, Port: 8080}
@@ -135,7 +135,7 @@ func TestIntegration_DistanceAndExploration(t *testing.T) {
 func TestIntegration_NodeAndRoutingTableInteraction(t *testing.T) {
 	// Create a node and verify routing table interaction
 	nodeID := bits.Rand()
-	node := NewNode(nodeID)
+	node := NewNode(nodeID, nil)
 
 	// Create test contact
 	contact := Contact{ID: bits.Rand(), IP: nil, Port: 8080}

@@ -55,6 +55,9 @@ type Node struct {
 	// data store
 	store *contactStore
 
+	// config for validation and other settings
+	conf *Config
+
 	// overrides for request handlers
 	requestHandler RequestHandlerFunc
 
@@ -63,11 +66,21 @@ type Node struct {
 }
 
 // NewNode returns an initialized Node's pointer.
-func NewNode(id bits.Bitmap) *Node {
+// ContactExpire behavior:
+// - Zero value: uses default tExpire duration
+// - Positive value: uses the specified duration
+// - Negative value: treated as zero, falls back to default tExpire
+func NewNode(id bits.Bitmap, config *Config) *Node {
+	contactExpire := tExpire // default
+	if config != nil && config.ContactExpire > 0 {
+		contactExpire = config.ContactExpire
+	}
+
 	return &Node{
 		id:    id,
 		rt:    newRoutingTable(id),
-		store: newStore(),
+		store: newStore(contactExpire),
+		conf:  config,
 
 		txLock:       &sync.RWMutex{},
 		transactions: make(map[messageID]*transaction),
@@ -236,11 +249,21 @@ func (n *Node) handleRequest(addr *net.UDPAddr, request Request) {
 		// TODO: we should be sending the IP in the request, not just using the sender's IP
 		// TODO: should we be using StoreArgs.NodeID or StoreArgs.Value.LbryID ???
 		if n.tokens.Verify(request.StoreArgs.Value.Token, request.NodeID, addr) {
-			n.Store(request.StoreArgs.BlobHash, Contact{ID: request.StoreArgs.NodeID, IP: addr.IP, Port: addr.Port, PeerPort: request.StoreArgs.Value.Port})
+			contact := Contact{ID: request.StoreArgs.NodeID, IP: addr.IP, Port: addr.Port, PeerPort: request.StoreArgs.Value.Port}
 
-			err := n.sendMessage(addr, Response{ID: request.ID, NodeID: n.id, Data: storeSuccessResponse})
-			if err != nil {
-				log.Error("error sending 'storemethod' response message - ", err)
+			// Validate before storing if validator is configured
+			if n.validateContactForHash(request.StoreArgs.BlobHash, contact) {
+				n.Store(request.StoreArgs.BlobHash, contact)
+				err := n.sendMessage(addr, Response{ID: request.ID, NodeID: n.id, Data: storeSuccessResponse})
+				if err != nil {
+					log.Error("error sending 'storemethod' response message - ", err)
+				}
+			} else {
+				// Send error response when validation fails
+				err := n.sendMessage(addr, Error{ID: request.ID, NodeID: n.id, ExceptionType: "invalid-contact"})
+				if err != nil {
+					log.Error("error sending 'storemethod' error response message - ", err)
+				}
 			}
 		} else {
 			err := n.sendMessage(addr, Error{ID: request.ID, NodeID: n.id, ExceptionType: "invalid-token"})
@@ -275,8 +298,25 @@ func (n *Node) handleRequest(addr *net.UDPAddr, request Request) {
 		}
 
 		if contacts := n.store.Get(*request.Arg); len(contacts) > 0 {
-			res.FindValueKey = request.Arg.RawString()
-			res.Contacts = contacts
+			// Filter contacts through validator if configured
+			var validContacts []Contact
+			for _, contact := range contacts {
+				if n.validateContactForHash(*request.Arg, contact) {
+					validContacts = append(validContacts, contact)
+				} else {
+					// Remove bad contact from store
+					n.store.RemoveContactFromHash(*request.Arg, contact)
+				}
+			}
+
+			// Only return "value found" if validation didn't prune all contacts
+			if len(validContacts) > 0 {
+				res.FindValueKey = request.Arg.RawString()
+				res.Contacts = validContacts
+			} else {
+				// Validation removed all contacts, fall back to routing table
+				res.Contacts = n.rt.GetClosest(*request.Arg, bucketSize)
+			}
 		} else {
 			res.Contacts = n.rt.GetClosest(*request.Arg, bucketSize)
 		}
@@ -481,4 +521,36 @@ func (n *Node) RemoveBadPeer(contact Contact) {
 // RemoveBadPeerFromHash removes a peer from a specific hash mapping
 func (n *Node) RemoveBadPeerFromHash(blobHash bits.Bitmap, contact Contact) {
 	n.store.RemoveContactFromHash(blobHash, contact)
+}
+
+// CleanupExpiredData removes all expired contacts from the store
+func (n *Node) CleanupExpiredData() {
+	n.store.CleanupExpired()
+}
+
+// validateContactForHash checks if a contact is valid for a specific blob hash using the configured validator
+// Returns true if valid or no validator is configured, false if invalid
+func (n *Node) validateContactForHash(blobHash bits.Bitmap, contact Contact) bool {
+	if n.conf == nil {
+		return true
+	}
+	if n.conf.Validator == nil {
+		return true
+	}
+	return n.conf.Validator.ValidateContactForHash(blobHash, contact)
+}
+
+// applyContactFiltering applies filtering to contacts if a validator is configured
+func (n *Node) applyContactFiltering(hash bits.Bitmap, contacts []Contact) []Contact {
+	if n.conf == nil || n.conf.Validator == nil {
+		return contacts
+	}
+
+	var filteredContacts []Contact
+	for _, contact := range contacts {
+		if n.validateContactForHash(hash, contact) {
+			filteredContacts = append(filteredContacts, contact)
+		}
+	}
+	return filteredContacts
 }
