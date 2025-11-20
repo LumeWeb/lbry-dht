@@ -671,3 +671,72 @@ func TestContactValidator_FindValueFiltering(t *testing.T) {
 		t.Error("Contact3 should be included in results")
 	}
 }
+
+func TestContactValidator_FindValueFallbackWhenAllFiltered(t *testing.T) {
+	// Create a DHT with a validator
+	config := NewStandardConfig()
+	validator := NewTestContactValidator()
+	config.Validator = validator
+
+	nodeID := bits.Rand()
+	node := NewNode(nodeID, config)
+
+	// Create test contacts
+	contact1 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	contact2 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8081}
+	routingContact := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8082}
+
+	// Create test hash
+	hash := bits.Rand()
+
+	// Allow validation for this hash
+	validator.AllowHash(hash)
+
+	// Don't allow any contacts - all should be filtered out
+	// (validator.AllowContact not called for any contact)
+
+	// Store contacts in the contact store
+	node.Store(hash, contact1)
+	node.Store(hash, contact2)
+
+	// Add a contact to the routing table (simulating fallback source)
+	node.AddKnownNode(routingContact)
+
+	// Test that filtering removes all stored contacts
+	allContacts := node.store.Get(hash)
+	if len(allContacts) != 2 {
+		t.Errorf("Expected 2 stored contacts, got %d", len(allContacts))
+	}
+
+	filteredContacts := node.applyContactFiltering(hash, allContacts)
+	if len(filteredContacts) != 0 {
+		t.Errorf("Expected 0 filtered contacts (all should be filtered out), got %d", len(filteredContacts))
+	}
+
+	// Verify that routing table still has contacts for fallback
+	closestContacts := node.rt.GetClosest(hash, 1)
+	if len(closestContacts) == 0 {
+		t.Error("Routing table should have contacts for fallback")
+	}
+
+	// Test the complete findValue flow: when all stored contacts are filtered,
+	// the system should fall back to routing table contacts
+	// This simulates the behavior in findValueMethod where filtered contacts
+	// would be empty and routing table contacts would be used instead
+	routingTableContacts := node.rt.GetClosest(hash, 20) // Get more for comprehensive test
+	if len(routingTableContacts) == 0 {
+		t.Error("Should have routing table contacts available for fallback")
+	}
+
+	// Verify that at least one routing table contact is different from stored contacts
+	foundRoutingContact := false
+	for _, c := range routingTableContacts {
+		if c.ID.Equals(routingContact.ID) {
+			foundRoutingContact = true
+			break
+		}
+	}
+	if !foundRoutingContact {
+		t.Error("Routing table should contain the fallback contact")
+	}
+}

@@ -178,17 +178,7 @@ type getOption func()
 
 // applyContactFiltering applies filtering to contacts if a validator is configured
 func (dht *DHT) applyContactFiltering(hash bits.Bitmap, contacts []Contact) []Contact {
-	if dht.conf.Validator == nil {
-		return contacts
-	}
-
-	var filteredContacts []Contact
-	for _, contact := range contacts {
-		if dht.conf.Validator.ValidateContactForHash(hash, contact) {
-			filteredContacts = append(filteredContacts, contact)
-		}
-	}
-	return filteredContacts
+	return dht.node.applyContactFiltering(hash, contacts)
 }
 
 // getWithOptions returns the list of nodes that have the blob for the given hash with optional filtering

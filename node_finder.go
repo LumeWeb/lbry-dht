@@ -107,7 +107,9 @@ CycleLoop:
 		}
 		cf.findValueMutex.Unlock()
 	} else {
-		contacts = cf.activeContacts
+		cf.activeContactsMutex.Lock()
+		contacts = append([]Contact(nil), cf.activeContacts...)
+		cf.activeContactsMutex.Unlock()
 		if len(contacts) > bucketSize {
 			contacts = contacts[:bucketSize]
 		}
@@ -321,10 +323,31 @@ func (cf *contactFinder) insertIntoActiveList(contact Contact) {
 func (cf *contactFinder) isSearchFinished() bool {
 	if cf.findValue {
 		cf.findValueMutex.Lock()
-		hasResults := len(cf.findValueResult) > 0
+		resultCount := len(cf.findValueResult)
 		cf.findValueMutex.Unlock()
-		if hasResults {
-			return true
+
+		// For findValue operations, we have more sophisticated termination logic:
+		// 1. If we have results AND we're not getting closer, terminate
+		// 2. If we have sufficient results (minimum threshold), consider termination
+		// 3. If we have any results but active contacts are exhausted, terminate
+		if resultCount > 0 {
+			// If we have results and are not getting closer, we're done
+			if cf.notGettingCloser.Load() {
+				return true
+			}
+
+			// Check if we have enough active contacts to potentially find better results
+			cf.activeContactsMutex.Lock()
+			activeCount := len(cf.activeContacts)
+			cf.activeContactsMutex.Unlock()
+
+			// If we have results but no more active contacts to probe, we're done
+			if activeCount == 0 {
+				return true
+			}
+
+			// Optional: Could add minimum result count threshold here in future
+			// For now, we continue searching to potentially find more/better results
 		}
 	}
 
@@ -362,18 +385,20 @@ func (cf *contactFinder) closest(contacts ...Contact) *Contact {
 }
 
 // mergeContacts combines existing contacts with new ones, removing duplicates
+// Uses "first writer wins" policy - if a contact ID already exists, the newer one is ignored
+// This prevents a malicious node from replacing a known good contact with a bad one
 func (cf *contactFinder) mergeContacts(existing, newContacts []Contact) []Contact {
 	// Create a map for O(1) lookup of existing contact IDs
-	existingMap := make(map[bits.Bitmap]bool)
+	existingMap := make(map[bits.Bitmap]struct{})
 	for _, c := range existing {
-		existingMap[c.ID] = true
+		existingMap[c.ID] = struct{}{}
 	}
 
 	// Only add contacts that don't already exist
 	for _, c := range newContacts {
-		if !existingMap[c.ID] {
+		if _, exists := existingMap[c.ID]; !exists {
 			existing = append(existing, c)
-			existingMap[c.ID] = true
+			existingMap[c.ID] = struct{}{}
 		}
 	}
 

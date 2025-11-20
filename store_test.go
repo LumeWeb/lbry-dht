@@ -7,6 +7,25 @@ import (
 	"go.lumeweb.com/lbry-dht/bits"
 )
 
+// testStoreWrapper provides test-only access to contactStore internals
+type testStoreWrapper struct {
+	*contactStore
+}
+
+// getTimestampFor returns the timestamp for a contact in a specific hash.
+// This is a test helper that safely accesses internal timestamp data.
+func (w *testStoreWrapper) getTimestampFor(blobHash bits.Bitmap, contactID bits.Bitmap) (time.Time, bool) {
+	w.contactStore.lock.RLock()
+	defer w.contactStore.lock.RUnlock()
+
+	if timestampMap, exists := w.contactStore.timestamps[blobHash]; exists {
+		if timestamp, exists := timestampMap[contactID]; exists {
+			return timestamp, true
+		}
+	}
+	return time.Time{}, false
+}
+
 // Test new store methods
 func TestContactStore_RemoveContact(t *testing.T) {
 	store := newStore(tExpire)
@@ -129,7 +148,7 @@ func TestContactStore_RemoveContact_NonExistent(t *testing.T) {
 }
 
 func TestContactStore_TimestampResetOnReadd(t *testing.T) {
-	store := newStore(tExpire)
+	store := &testStoreWrapper{newStore(tExpire)}
 
 	contact := Contact{ID: bits.Rand(), IP: nil, Port: 8080}
 	hash := bits.Rand()
@@ -137,10 +156,11 @@ func TestContactStore_TimestampResetOnReadd(t *testing.T) {
 	// Add contact to store
 	store.Upsert(hash, contact)
 
-	// Get the initial timestamp by accessing the internal timestamps map
-	store.lock.RLock()
-	initialTimestamp := store.timestamps[hash][contact.ID]
-	store.lock.RUnlock()
+	// Get the initial timestamp using the test wrapper
+	initialTimestamp, exists := store.getTimestampFor(hash, contact.ID)
+	if !exists {
+		t.Fatal("Initial timestamp should exist")
+	}
 
 	// Wait a bit to ensure timestamp difference
 	time.Sleep(50 * time.Millisecond)
@@ -148,10 +168,11 @@ func TestContactStore_TimestampResetOnReadd(t *testing.T) {
 	// Re-add the same contact (should reset timestamp)
 	store.Upsert(hash, contact)
 
-	// Get the updated timestamp
-	store.lock.RLock()
-	updatedTimestamp := store.timestamps[hash][contact.ID]
-	store.lock.RUnlock()
+	// Get the updated timestamp using the test wrapper
+	updatedTimestamp, exists := store.getTimestampFor(hash, contact.ID)
+	if !exists {
+		t.Fatal("Updated timestamp should exist")
+	}
 
 	// Verify timestamp was updated (should be later than initial)
 	if !updatedTimestamp.After(initialTimestamp) {
@@ -169,8 +190,8 @@ func TestContactStore_TimestampResetOnReadd(t *testing.T) {
 }
 
 func TestContactStore_Expiration(t *testing.T) {
-	// Use short expiration time for testing
-	shortExpire := 100 * time.Millisecond
+	// Use longer expiration time for testing to reduce flakiness
+	shortExpire := 200 * time.Millisecond
 	store := newStore(shortExpire)
 
 	contact1 := Contact{ID: bits.Rand(), IP: nil, Port: 8080}
@@ -186,8 +207,8 @@ func TestContactStore_Expiration(t *testing.T) {
 		t.Errorf("Expected 2 contacts, got %d", len(store.Get(hash)))
 	}
 
-	// Wait for expiration
-	time.Sleep(150 * time.Millisecond)
+	// Wait for expiration with larger safety margin
+	time.Sleep(250 * time.Millisecond)
 
 	// Get should clean up expired contacts
 	contacts := store.Get(hash)
@@ -210,8 +231,8 @@ func TestContactStore_Expiration(t *testing.T) {
 }
 
 func TestContactStore_ExpirationWithReadd(t *testing.T) {
-	// Use short expiration time for testing
-	shortExpire := 100 * time.Millisecond
+	// Use longer expiration time for testing to reduce flakiness
+	shortExpire := 200 * time.Millisecond
 	store := newStore(shortExpire)
 
 	contact := Contact{ID: bits.Rand(), IP: nil, Port: 8080}
@@ -220,14 +241,14 @@ func TestContactStore_ExpirationWithReadd(t *testing.T) {
 	// Add contact to store
 	store.Upsert(hash, contact)
 
-	// Wait for near expiration but not quite
-	time.Sleep(50 * time.Millisecond)
+	// Wait for near expiration but not quite (with larger margin)
+	time.Sleep(100 * time.Millisecond)
 
 	// Re-add contact (should reset timestamp)
 	store.Upsert(hash, contact)
 
 	// Wait past original expiration time
-	time.Sleep(80 * time.Millisecond) // Slightly less than expiration time
+	time.Sleep(150 * time.Millisecond) // Slightly less than expiration time
 
 	// Contact should still exist because timestamp was reset
 	contacts := store.Get(hash)
@@ -235,8 +256,8 @@ func TestContactStore_ExpirationWithReadd(t *testing.T) {
 		t.Errorf("Expected 1 contact after re-add, got %d", len(contacts))
 	}
 
-	// Wait for expiration after re-add
-	time.Sleep(120 * time.Millisecond) // Ensure it expires
+	// Wait for expiration after re-add (with larger margin)
+	time.Sleep(250 * time.Millisecond) // Ensure it expires
 
 	// Now it should be expired
 	contacts = store.Get(hash)

@@ -34,9 +34,8 @@ const (
 	//                            scratch that. a findValue could return more than K results if a lot of nodes are storing that value, so we need more buffer
 
 	maxPeerFails = 3                // after this many failures, a peer is considered bad and will be removed from the routing table
-	tExpire      = 60 * time.Minute // the time after which a key/value pair expires; this is a time-to-live (TTL) from the original publication date
-	// overridden when Config.ContactExpire > 0
-	tRefresh = 1 * time.Hour // the time after which an otherwise unaccessed bucket must be refreshed
+	tExpire      = 60 * time.Minute // default TTL for key/value pairs AND contacts; used when Config.ContactExpire is zero
+	tRefresh     = 1 * time.Hour    // the time after which an otherwise unaccessed bucket must be refreshed
 	//tReplicate   = 1 * time.Hour    // the interval between Kademlia replication events, when a node is required to publish its entire database
 	//tNodeRefresh = 15 * time.Minute // the time after which a good node becomes questionable if it has not messaged us
 
