@@ -118,11 +118,16 @@ func TestDHT_GetDistanceFromTarget(t *testing.T) {
 	nodeIDHex := strings.Repeat("01", 48) // 96 characters
 	targetHex := strings.Repeat("00", 48) // 96 characters
 
-	dht := New(&Config{NodeID: nodeIDHex})
-	// Initialize the DHT to set up internal components properly
-	nodeID := bits.FromHexP(nodeIDHex)
-	dht.contact = Contact{ID: nodeID, IP: net.ParseIP("127.0.0.1"), Port: 8080}
-	dht.node = NewNode(nodeID)
+	// Create DHT with Config-based initialization
+	dht := New(&Config{NodeID: nodeIDHex, Address: "127.0.0.1:8080", AnnounceRate: DefaultAnnounceRate})
+
+	// Initialize DHT components properly by starting it
+	err := dht.Start()
+	if err != nil {
+		t.Fatalf("Failed to start DHT: %v", err)
+	}
+	defer dht.Shutdown()
+
 	target := bits.FromHexP(targetHex)
 
 	distance := dht.GetDistanceFromTarget(target)
