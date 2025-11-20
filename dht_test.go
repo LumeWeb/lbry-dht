@@ -85,25 +85,44 @@ func TestDHT_GetNode(t *testing.T) {
 }
 
 func TestDHT_GetRoutingTable(t *testing.T) {
-	dht := New(nil)
-	// Initialize the DHT to set up internal components
-	dht.node = NewNode(bits.Rand())
+	nodeID := bits.Rand().Hex()
+	dht := New(&Config{
+		NodeID:       nodeID,
+		Address:      "127.0.0.1:0",
+		AnnounceRate: DefaultAnnounceRate,
+	})
+	err := dht.Start()
+	if err != nil {
+		t.Fatalf("Failed to start DHT: %v", err)
+	}
+	defer dht.Shutdown()
+
 	if dht.GetRoutingTable() == nil {
 		t.Error("GetRoutingTable() returned nil")
 	}
 }
 
 func TestDHT_GetContacts(t *testing.T) {
-	dht := New(nil)
-	// Initialize the DHT to set up internal components properly
+	// Generate a random node ID and convert to hex string for Config
 	nodeID := bits.Rand()
-	dht.contact = Contact{ID: nodeID, IP: net.ParseIP("127.0.0.1"), Port: 8080}
-	dht.node = NewNode(nodeID)
+	nodeIDHex := nodeID.Hex()
+
+	// Create DHT with Config-based initialization
+	dht := New(&Config{NodeID: nodeIDHex, Address: "127.0.0.1:8080", AnnounceRate: DefaultAnnounceRate})
+
+	// Initialize DHT components properly by starting it
+	err := dht.Start()
+	if err != nil {
+		t.Fatalf("Failed to start DHT: %v", err)
+	}
+	defer dht.Shutdown()
+
 	// Ensure routing table is properly initialized
-	if dht.node.rt == nil {
+	if dht.GetRoutingTable() == nil {
 		t.Error("Routing table is nil")
 		return
 	}
+
 	contacts := dht.GetContacts()
 	// GetContacts should return an empty slice, not nil, when no contacts exist
 	if contacts == nil {
@@ -238,7 +257,7 @@ func TestDHT_RemoveBadPeerFromHash(t *testing.T) {
 	blobHash := bits.Rand()
 
 	// Store contact for the blob hash
-	dht.node.store.Upsert(blobHash, contact)
+	dht.node.Store(blobHash, contact)
 
 	dht.RemoveBadPeerFromHash(blobHash, contact)
 
