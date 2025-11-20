@@ -65,9 +65,20 @@ func TestNodeFinder_FindNodes(t *testing.T) {
 
 // Test new DHT methods
 func TestDHT_GetNode(t *testing.T) {
-	dht := New(nil)
-	// Initialize the DHT to set up internal components
-	dht.node = NewNode(bits.Rand())
+	// Generate a random node ID and convert to hex string for Config
+	nodeID := bits.Rand()
+	nodeIDHex := nodeID.Hex()
+
+	// Create DHT with Config-based initialization
+	dht := New(&Config{NodeID: nodeIDHex, Address: "127.0.0.1:8080", AnnounceRate: DefaultAnnounceRate})
+
+	// Initialize DHT components properly by starting it
+	err := dht.Start()
+	if err != nil {
+		t.Fatalf("Failed to start DHT: %v", err)
+	}
+	defer dht.Shutdown()
+
 	if dht.GetNode() == nil {
 		t.Error("GetNode() returned nil")
 	}
@@ -163,24 +174,81 @@ func TestDHT_FindContacts(t *testing.T) {
 }
 
 func TestDHT_RemoveBadPeer(t *testing.T) {
-	dht := New(nil)
-	// Initialize the DHT to set up internal components
-	dht.node = NewNode(bits.Rand())
+	nodeID := bits.Rand().Hex()
+	dht := New(&Config{
+		NodeID:       nodeID,
+		Address:      "127.0.0.1:0",
+		AnnounceRate: DefaultAnnounceRate,
+	})
+	err := dht.Start()
+	if err != nil {
+		t.Fatalf("Failed to start DHT: %v", err)
+	}
+	defer dht.Shutdown()
+
 	contact := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
 
-	// This should not panic
+	// Add contact to store first
+	blobHash := bits.Rand()
+	dht.node.Store(blobHash, contact)
+
+	// Verify contact is in store before removal
+	contactsBefore := dht.node.store.Get(blobHash)
+	found := false
+	for _, c := range contactsBefore {
+		if c.ID.Equals(contact.ID) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("Failed to add contact to store before removal test")
+	}
+
 	dht.RemoveBadPeer(contact)
+
+	// Verify removal from contact store
+	contactsAfter := dht.node.store.Get(blobHash)
+	found = false
+	for _, c := range contactsAfter {
+		if c.ID.Equals(contact.ID) {
+			found = true
+			break
+		}
+	}
+	if found {
+		t.Error("RemoveBadPeer() did not remove contact from contact store")
+	}
 }
 
 func TestDHT_RemoveBadPeerFromHash(t *testing.T) {
-	dht := New(nil)
-	// Initialize the DHT to set up internal components
-	dht.node = NewNode(bits.Rand())
+	nodeID := bits.Rand().Hex()
+	dht := New(&Config{
+		NodeID:       nodeID,
+		Address:      "127.0.0.1:0",
+		AnnounceRate: DefaultAnnounceRate,
+	})
+	err := dht.Start()
+	if err != nil {
+		t.Fatalf("Failed to start DHT: %v", err)
+	}
+	defer dht.Shutdown()
+
 	contact := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
 	blobHash := bits.Rand()
 
-	// This should not panic
+	// Store contact for the blob hash
+	dht.node.store.Upsert(blobHash, contact)
+
 	dht.RemoveBadPeerFromHash(blobHash, contact)
+
+	// Verify removal
+	contacts := dht.node.store.Get(blobHash)
+	for _, c := range contacts {
+		if c.ID.Equals(contact.ID) {
+			t.Error("RemoveBadPeerFromHash() did not remove contact from blob hash")
+		}
+	}
 }
 
 func TestDHT_ExploreKeyspace(t *testing.T) {
