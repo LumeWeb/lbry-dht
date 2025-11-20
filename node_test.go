@@ -266,7 +266,7 @@ func TestFindNode(t *testing.T) {
 
 // Test new Node methods
 func TestNode_RemoveBadPeer(t *testing.T) {
-	node := NewNode(bits.Rand())
+	node := NewNode(bits.Rand(), nil)
 	contact := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
 
 	// Add contact to store first
@@ -277,7 +277,7 @@ func TestNode_RemoveBadPeer(t *testing.T) {
 }
 
 func TestNode_RemoveBadPeerFromHash(t *testing.T) {
-	node := NewNode(bits.Rand())
+	node := NewNode(bits.Rand(), nil)
 	contact := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
 	blobHash := bits.Rand()
 

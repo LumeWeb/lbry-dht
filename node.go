@@ -55,6 +55,9 @@ type Node struct {
 	// data store
 	store *contactStore
 
+	// config for validation and other settings
+	conf *Config
+
 	// overrides for request handlers
 	requestHandler RequestHandlerFunc
 
@@ -63,11 +66,17 @@ type Node struct {
 }
 
 // NewNode returns an initialized Node's pointer.
-func NewNode(id bits.Bitmap) *Node {
+func NewNode(id bits.Bitmap, config *Config) *Node {
+	contactExpire := tExpire // default
+	if config != nil && config.ContactExpire > 0 {
+		contactExpire = config.ContactExpire
+	}
+
 	return &Node{
 		id:    id,
 		rt:    newRoutingTable(id),
-		store: newStore(),
+		store: newStore(contactExpire),
+		conf:  config,
 
 		txLock:       &sync.RWMutex{},
 		transactions: make(map[messageID]*transaction),
@@ -236,7 +245,12 @@ func (n *Node) handleRequest(addr *net.UDPAddr, request Request) {
 		// TODO: we should be sending the IP in the request, not just using the sender's IP
 		// TODO: should we be using StoreArgs.NodeID or StoreArgs.Value.LbryID ???
 		if n.tokens.Verify(request.StoreArgs.Value.Token, request.NodeID, addr) {
-			n.Store(request.StoreArgs.BlobHash, Contact{ID: request.StoreArgs.NodeID, IP: addr.IP, Port: addr.Port, PeerPort: request.StoreArgs.Value.Port})
+			contact := Contact{ID: request.StoreArgs.NodeID, IP: addr.IP, Port: addr.Port, PeerPort: request.StoreArgs.Value.Port}
+
+			// Validate before storing if validator is configured
+			if n.validateContactForHash(request.StoreArgs.BlobHash, contact) {
+				n.Store(request.StoreArgs.BlobHash, contact)
+			}
 
 			err := n.sendMessage(addr, Response{ID: request.ID, NodeID: n.id, Data: storeSuccessResponse})
 			if err != nil {
@@ -275,8 +289,19 @@ func (n *Node) handleRequest(addr *net.UDPAddr, request Request) {
 		}
 
 		if contacts := n.store.Get(*request.Arg); len(contacts) > 0 {
+			// Filter contacts through validator if configured
+			var validContacts []Contact
+			for _, contact := range contacts {
+				if n.validateContactForHash(*request.Arg, contact) {
+					validContacts = append(validContacts, contact)
+				} else {
+					// Remove bad contact from store
+					n.store.RemoveContactFromHash(*request.Arg, contact)
+				}
+			}
+
 			res.FindValueKey = request.Arg.RawString()
-			res.Contacts = contacts
+			res.Contacts = validContacts
 		} else {
 			res.Contacts = n.rt.GetClosest(*request.Arg, bucketSize)
 		}
@@ -481,4 +506,39 @@ func (n *Node) RemoveBadPeer(contact Contact) {
 // RemoveBadPeerFromHash removes a peer from a specific hash mapping
 func (n *Node) RemoveBadPeerFromHash(blobHash bits.Bitmap, contact Contact) {
 	n.store.RemoveContactFromHash(blobHash, contact)
+}
+
+// CleanupExpiredData removes all expired contacts from the store
+func (n *Node) CleanupExpiredData() {
+	n.store.CleanupExpired()
+}
+
+// validateContactForHash checks if a contact is valid for a specific blob hash using the configured validator
+// Returns true if valid or no validator is configured, false if invalid
+func (n *Node) validateContactForHash(blobHash bits.Bitmap, contact Contact) bool {
+	if n.conf == nil {
+		return true
+	}
+	if n.conf.Validator == nil {
+		return true
+	}
+	return n.conf.Validator.ValidateContactForHash(blobHash, contact)
+}
+
+// applyContactFiltering applies filtering to contacts if a validator is configured
+func (n *Node) applyContactFiltering(hash bits.Bitmap, contacts []Contact) []Contact {
+	if n.conf == nil {
+		return contacts
+	}
+	if n.conf.Validator == nil {
+		return contacts
+	}
+
+	var filteredContacts []Contact
+	for _, contact := range contacts {
+		if n.conf.Validator.ValidateContactForHash(hash, contact) {
+			filteredContacts = append(filteredContacts, contact)
+		}
+	}
+	return filteredContacts
 }

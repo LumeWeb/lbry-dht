@@ -68,7 +68,7 @@ func (dht *DHT) connect(conn UDPConn) error {
 	}
 
 	dht.contact = contact
-	dht.node = NewNode(contact.ID)
+	dht.node = NewNode(contact.ID, dht.conf)
 	dht.tokenCache = newTokenCache(dht.node, tokenSecretRotationInterval)
 
 	return dht.node.Connect(conn)
@@ -173,8 +173,26 @@ func (dht *DHT) Ping(addr string) error {
 	return nil
 }
 
-// Get returns the list of nodes that have the blob for the given hash
-func (dht *DHT) Get(hash bits.Bitmap) ([]Contact, error) {
+// GetOption represents a functional option for Get operations (currently unused but kept for future extensibility)
+type GetOption func()
+
+// applyContactFiltering applies filtering to contacts if a validator is configured
+func (dht *DHT) applyContactFiltering(hash bits.Bitmap, contacts []Contact) []Contact {
+	if dht.conf.Validator == nil {
+		return contacts
+	}
+
+	var filteredContacts []Contact
+	for _, contact := range contacts {
+		if dht.conf.Validator.ValidateContactForHash(hash, contact) {
+			filteredContacts = append(filteredContacts, contact)
+		}
+	}
+	return filteredContacts
+}
+
+// GetWithOptions returns the list of nodes that have the blob for the given hash with optional filtering
+func (dht *DHT) GetWithOptions(hash bits.Bitmap, options ...GetOption) ([]Contact, error) {
 	contacts, found, err := FindContacts(dht.node, hash, true, dht.grp.Child())
 	if err != nil {
 		return nil, err
@@ -184,6 +202,11 @@ func (dht *DHT) Get(hash bits.Bitmap) ([]Contact, error) {
 		return contacts, nil
 	}
 	return nil, nil
+}
+
+// Get returns the list of nodes that have the blob for the given hash
+func (dht *DHT) Get(hash bits.Bitmap) ([]Contact, error) {
+	return dht.GetWithOptions(hash)
 }
 
 // PrintState prints the current state of the DHT including address, nr outstanding transactions, stored hashes as well

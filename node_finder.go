@@ -225,11 +225,16 @@ func (cf *contactFinder) probe(cycleID string) *Contact {
 
 	if cf.findValue && res.FindValueKey != "" {
 		cf.debug("|%s| probe %s: got value", cycleID, c.ID.HexShort())
+
+		// Apply filtering if validator is configured
+		validContacts := cf.node.applyContactFiltering(cf.target, res.Contacts)
+
 		cf.findValueMutex.Lock()
-		cf.findValueResult = res.Contacts
+		cf.findValueResult = cf.mergeContacts(cf.findValueResult, validContacts)
 		cf.findValueMutex.Unlock()
-		cf.grp.Stop()
-		return nil
+
+		// Don't stop immediately - let normal search termination logic handle it
+		// This allows accumulating more contacts from other nodes
 	}
 
 	cf.debug("|%s| probe %s: got %s", cycleID, c.ID.HexShort(), res.argsDebug())
@@ -335,4 +340,23 @@ func (cf *contactFinder) closest(contacts ...Contact) *Contact {
 		}
 	}
 	return &closest
+}
+
+// mergeContacts combines existing contacts with new ones, removing duplicates
+func (cf *contactFinder) mergeContacts(existing, newContacts []Contact) []Contact {
+	// Create a map for O(1) lookup of existing contact IDs
+	existingMap := make(map[bits.Bitmap]bool)
+	for _, c := range existing {
+		existingMap[c.ID] = true
+	}
+
+	// Only add contacts that don't already exist
+	for _, c := range newContacts {
+		if !existingMap[c.ID] {
+			existing = append(existing, c)
+			existingMap[c.ID] = true
+		}
+	}
+
+	return existing
 }

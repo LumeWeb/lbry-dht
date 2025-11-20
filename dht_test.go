@@ -463,3 +463,216 @@ func TestDHT_LargeDHT(t *testing.T) {
 		}
 	}
 }
+
+// TestContactValidator implements ContactValidator interface for testing
+type TestContactValidator struct {
+	allowedContacts map[bits.Bitmap]bool // contacts that are allowed
+	allowedHashes   map[bits.Bitmap]bool // hashes that allow validation
+}
+
+func NewTestContactValidator() *TestContactValidator {
+	return &TestContactValidator{
+		allowedContacts: make(map[bits.Bitmap]bool),
+		allowedHashes:   make(map[bits.Bitmap]bool),
+	}
+}
+
+func (v *TestContactValidator) AllowContact(contact Contact) {
+	v.allowedContacts[contact.ID] = true
+}
+
+func (v *TestContactValidator) AllowHash(hash bits.Bitmap) {
+	v.allowedHashes[hash] = true
+}
+
+func (v *TestContactValidator) ValidateContactForHash(blobHash bits.Bitmap, contact Contact) bool {
+	// If hash is not in allowed list, allow all contacts for that hash
+	if !v.allowedHashes[blobHash] {
+		return true
+	}
+
+	// If hash is in allowed list, only allow allowed contacts
+	return v.allowedContacts[contact.ID]
+}
+
+func TestGetWithOptions(t *testing.T) {
+	// Create a DHT with a validator
+	config := NewStandardConfig()
+	validator := NewTestContactValidator()
+	config.Validator = validator
+
+	dht := New(config)
+
+	// Initialize the DHT
+	nodeID := bits.Rand()
+	dht.contact = Contact{ID: nodeID}
+	dht.node = NewNode(nodeID, config)
+
+	// Create test contacts
+	contact1 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	contact2 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8081}
+	contact3 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8082}
+
+	// Create test hash
+	hash := bits.Rand()
+
+	// Allow validation for this hash
+	validator.AllowHash(hash)
+
+	// Allow only contact1 and contact3
+	validator.AllowContact(contact1)
+	validator.AllowContact(contact3)
+
+	// Test applyContactFiltering directly instead of using GetWithOptions
+	// to avoid network dependencies
+	contacts := []Contact{contact1, contact2, contact3}
+	filteredContacts := dht.applyContactFiltering(hash, contacts)
+
+	if len(filteredContacts) != 2 {
+		t.Errorf("Expected 2 filtered contacts, got %d", len(filteredContacts))
+	}
+
+	// Verify the right contacts are returned
+	contactIDs := make(map[bits.Bitmap]bool)
+	for _, c := range filteredContacts {
+		contactIDs[c.ID] = true
+	}
+
+	if !contactIDs[contact1.ID] {
+		t.Error("Contact1 should be included in results")
+	}
+	if contactIDs[contact2.ID] {
+		t.Error("Contact2 should be filtered out")
+	}
+	if !contactIDs[contact3.ID] {
+		t.Error("Contact3 should be included in results")
+	}
+}
+
+func TestContactValidator_StoreValidation(t *testing.T) {
+	// Create a DHT with a validator
+	config := NewStandardConfig()
+	validator := NewTestContactValidator()
+	config.Validator = validator
+
+	nodeID := bits.Rand()
+	node := NewNode(nodeID, config)
+
+	// Create test contacts
+	contact1 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	contact2 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8081}
+
+	// Create test hash
+	hash := bits.Rand()
+
+	// Allow validation for this hash
+	validator.AllowHash(hash)
+
+	// Allow only contact1
+	validator.AllowContact(contact1)
+
+	// Test storing contacts directly (Store method doesn't validate - only handleRequest does)
+	// So both contacts will be stored
+	node.Store(hash, contact1)
+	node.Store(hash, contact2)
+
+	// Check stored contacts - both should be there since Store doesn't validate
+	contacts := node.store.Get(hash)
+	if len(contacts) != 2 {
+		t.Errorf("Expected 2 stored contacts, got %d", len(contacts))
+	}
+
+	// Test validation through validateContactForHash method directly
+	valid1 := node.validateContactForHash(hash, contact1)
+	valid2 := node.validateContactForHash(hash, contact2)
+
+	if !valid1 {
+		t.Error("Contact1 should be valid")
+	}
+	if valid2 {
+		t.Error("Contact2 should be invalid")
+	}
+}
+
+func TestContactValidator_NoValidation(t *testing.T) {
+	// Create a DHT without validator
+	config := NewStandardConfig()
+
+	nodeID := bits.Rand()
+	node := NewNode(nodeID, config)
+
+	// Create test contacts
+	contact1 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	contact2 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8081}
+
+	// Create test hash
+	hash := bits.Rand()
+
+	// Store contacts without validation
+	node.Store(hash, contact1)
+	node.Store(hash, contact2)
+
+	// Check stored contacts
+	contacts := node.store.Get(hash)
+	if len(contacts) != 2 {
+		t.Errorf("Expected 2 stored contacts, got %d", len(contacts))
+	}
+}
+
+func TestContactValidator_FindValueFiltering(t *testing.T) {
+	// Create a DHT with a validator
+	config := NewStandardConfig()
+	validator := NewTestContactValidator()
+	config.Validator = validator
+
+	nodeID := bits.Rand()
+	node := NewNode(nodeID, config)
+
+	// Create test contacts
+	contact1 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	contact2 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8081}
+	contact3 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8082}
+
+	// Create test hash
+	hash := bits.Rand()
+
+	// Allow validation for this hash
+	validator.AllowHash(hash)
+
+	// Allow only contact1 and contact3
+	validator.AllowContact(contact1)
+	validator.AllowContact(contact3)
+
+	// Store all contacts directly in store (simulating previous storage)
+	node.store.hashes[hash] = map[bits.Bitmap]bool{
+		contact1.ID: true,
+		contact2.ID: true,
+		contact3.ID: true,
+	}
+	node.store.contacts[contact1.ID] = contact1
+	node.store.contacts[contact2.ID] = contact2
+	node.store.contacts[contact3.ID] = contact3
+
+	// Test findValue filtering using node's applyContactFiltering method
+	allContacts := node.store.Get(hash)
+	filteredContacts := node.applyContactFiltering(hash, allContacts)
+	if len(filteredContacts) != 2 {
+		t.Errorf("Expected 2 filtered contacts, got %d", len(filteredContacts))
+	}
+
+	// Verify the right contacts are returned
+	contactIDs := make(map[bits.Bitmap]bool)
+	for _, c := range filteredContacts {
+		contactIDs[c.ID] = true
+	}
+
+	if !contactIDs[contact1.ID] {
+		t.Error("Contact1 should be included in results")
+	}
+	if contactIDs[contact2.ID] {
+		t.Error("Contact2 should be filtered out")
+	}
+	if !contactIDs[contact3.ID] {
+		t.Error("Contact3 should be included in results")
+	}
+}
