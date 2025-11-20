@@ -63,6 +63,41 @@ func TestNodeFinder_FindNodes(t *testing.T) {
 	}
 }
 
+// assertContactInStore verifies that a contact exists in the store for a given blob hash
+func assertContactInStore(t *testing.T, store *contactStore, blobHash bits.Bitmap, contact Contact, shouldExist bool) {
+	contacts := store.Get(blobHash)
+	found := false
+	for _, c := range contacts {
+		if c.ID.Equals(contact.ID) {
+			found = true
+			break
+		}
+	}
+
+	if shouldExist && !found {
+		t.Errorf("Expected contact %s to be found in store for hash %s", contact.ID.HexShort(), blobHash.HexShort())
+	} else if !shouldExist && found {
+		t.Errorf("Expected contact %s to NOT be found in store for hash %s", contact.ID.HexShort(), blobHash.HexShort())
+	}
+}
+
+// assertContactInRoutingTable verifies that a contact exists in the routing table
+func assertContactInRoutingTable(t *testing.T, rt *routingTable, contact Contact, shouldExist bool) {
+	found := false
+	for _, bucket := range rt.buckets {
+		if bucket.Has(contact) {
+			found = true
+			break
+		}
+	}
+
+	if shouldExist && !found {
+		t.Errorf("Expected contact %s to be found in routing table", contact.ID.HexShort())
+	} else if !shouldExist && found {
+		t.Errorf("Expected contact %s to NOT be found in routing table", contact.ID.HexShort())
+	}
+}
+
 // Test new DHT methods
 func TestDHT_GetNode(t *testing.T) {
 	// Generate a random node ID and convert to hex string for Config
@@ -70,7 +105,7 @@ func TestDHT_GetNode(t *testing.T) {
 	nodeIDHex := nodeID.Hex()
 
 	// Create DHT with Config-based initialization
-	dht := New(&Config{NodeID: nodeIDHex, Address: "127.0.0.1:8080", AnnounceRate: DefaultAnnounceRate})
+	dht := New(&Config{NodeID: nodeIDHex, Address: "127.0.0.1:0", AnnounceRate: DefaultAnnounceRate})
 
 	// Initialize DHT components properly by starting it
 	err := dht.Start()
@@ -108,7 +143,7 @@ func TestDHT_GetContacts(t *testing.T) {
 	nodeIDHex := nodeID.Hex()
 
 	// Create DHT with Config-based initialization
-	dht := New(&Config{NodeID: nodeIDHex, Address: "127.0.0.1:8080", AnnounceRate: DefaultAnnounceRate})
+	dht := New(&Config{NodeID: nodeIDHex, Address: "127.0.0.1:0", AnnounceRate: DefaultAnnounceRate})
 
 	// Initialize DHT components properly by starting it
 	err := dht.Start()
@@ -134,6 +169,8 @@ func TestDHT_GetContacts(t *testing.T) {
 }
 
 func TestDHT_GetRandomTarget(t *testing.T) {
+	// GetRandomTarget is independent of DHT startup - it generates random targets
+	// without requiring network initialization or node state
 	dht := New(nil)
 	target1 := dht.GetRandomTarget()
 	target2 := dht.GetRandomTarget()
@@ -149,7 +186,7 @@ func TestDHT_GetDistanceFromTarget(t *testing.T) {
 	targetHex := strings.Repeat("00", 48) // 96 characters
 
 	// Create DHT with Config-based initialization
-	dht := New(&Config{NodeID: nodeIDHex, Address: "127.0.0.1:8080", AnnounceRate: DefaultAnnounceRate})
+	dht := New(&Config{NodeID: nodeIDHex, Address: "127.0.0.1:0", AnnounceRate: DefaultAnnounceRate})
 
 	// Initialize DHT components properly by starting it
 	err := dht.Start()
@@ -190,6 +227,29 @@ func TestDHT_FindContacts(t *testing.T) {
 	if len(contacts) == 0 {
 		t.Error("FindContacts() returned no contacts")
 	}
+
+	// Stronger invariants: verify at least one other node is found
+	foundOtherNode := false
+	for _, contact := range contacts {
+		if !contact.ID.Equals(dhts[0].ID()) {
+			foundOtherNode = true
+			break
+		}
+	}
+	if !foundOtherNode {
+		t.Error("FindContacts() should return at least one other node")
+	}
+
+	// Verify results are ordered by distance (closest first)
+	for i := 1; i < len(contacts); i++ {
+		prevDist := contacts[i-1].ID.Xor(target)
+		currDist := contacts[i].ID.Xor(target)
+		if prevDist.Cmp(currDist) > 0 {
+			t.Errorf("FindContacts() results not ordered by distance: contact[%d] distance=%s > contact[%d] distance=%s",
+				i-1, prevDist.HexShort(), i, currDist.HexShort())
+			break
+		}
+	}
 }
 
 func TestDHT_RemoveBadPeer(t *testing.T) {
@@ -211,33 +271,21 @@ func TestDHT_RemoveBadPeer(t *testing.T) {
 	blobHash := bits.Rand()
 	dht.node.Store(blobHash, contact)
 
-	// Verify contact is in store before removal
-	contactsBefore := dht.node.store.Get(blobHash)
-	found := false
-	for _, c := range contactsBefore {
-		if c.ID.Equals(contact.ID) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal("Failed to add contact to store before removal test")
-	}
+	// Also add contact to routing table to test routing table expectations
+	dht.node.AddKnownNode(contact)
+
+	// Verify contact is in store and routing table before removal
+	assertContactInStore(t, dht.node.store, blobHash, contact, true)
+	assertContactInRoutingTable(t, dht.GetRoutingTable(), contact, true)
 
 	dht.RemoveBadPeer(contact)
 
-	// Verify removal from contact store
-	contactsAfter := dht.node.store.Get(blobHash)
-	found = false
-	for _, c := range contactsAfter {
-		if c.ID.Equals(contact.ID) {
-			found = true
-			break
-		}
-	}
-	if found {
-		t.Error("RemoveBadPeer() did not remove contact from contact store")
-	}
+	// Verify removal from contact store (should be removed)
+	assertContactInStore(t, dht.node.store, blobHash, contact, false)
+
+	// Note: RemoveBadPeer only removes from contact store, not routing table
+	// This is the current behavior - routing table removal happens through failure mechanisms
+	assertContactInRoutingTable(t, dht.GetRoutingTable(), contact, true)
 }
 
 func TestDHT_RemoveBadPeerFromHash(t *testing.T) {
@@ -259,15 +307,13 @@ func TestDHT_RemoveBadPeerFromHash(t *testing.T) {
 	// Store contact for the blob hash
 	dht.node.Store(blobHash, contact)
 
+	// Verify contact is in store before removal
+	assertContactInStore(t, dht.node.store, blobHash, contact, true)
+
 	dht.RemoveBadPeerFromHash(blobHash, contact)
 
-	// Verify removal
-	contacts := dht.node.store.Get(blobHash)
-	for _, c := range contacts {
-		if c.ID.Equals(contact.ID) {
-			t.Error("RemoveBadPeerFromHash() did not remove contact from blob hash")
-		}
-	}
+	// Verify removal from store (should be removed)
+	assertContactInStore(t, dht.node.store, blobHash, contact, false)
 }
 
 func TestDHT_ExploreKeyspace(t *testing.T) {
@@ -284,13 +330,19 @@ func TestDHT_ExploreKeyspace(t *testing.T) {
 	}()
 
 	target := bits.Rand()
-	contacts, err := dhts[0].ExploreKeyspaceWithLimit(target, 1) // Use limited version for testing
+	limit := 2
+	contacts, err := dhts[0].ExploreKeyspaceWithLimit(target, limit) // Use limited version for testing
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if len(contacts) == 0 {
 		t.Error("ExploreKeyspaceWithLimit() returned no contacts")
+	}
+
+	// Assert that the limit semantics are respected
+	if len(contacts) > limit {
+		t.Fatalf("ExploreKeyspaceWithLimit() returned %d contacts, which exceeds the requested limit of %d", len(contacts), limit)
 	}
 }
 
