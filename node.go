@@ -472,3 +472,13 @@ func (n *Node) Store(hash bits.Bitmap, c Contact) {
 func (n *Node) AddKnownNode(c Contact) {
 	n.rt.Update(c)
 }
+
+// RemoveBadPeer removes a peer from the contact store (for all hashes)
+func (n *Node) RemoveBadPeer(contact Contact) {
+	n.store.RemoveContact(contact)
+}
+
+// RemoveBadPeerFromHash removes a peer from a specific hash mapping
+func (n *Node) RemoveBadPeerFromHash(blobHash bits.Bitmap, contact Contact) {
+	n.store.RemoveContactFromHash(blobHash, contact)
+}

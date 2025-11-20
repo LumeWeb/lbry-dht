@@ -326,3 +326,32 @@ func TestRoutingTable_Load_ID(t *testing.T) {
 func TestRoutingTable_Load_Contacts(t *testing.T) {
 	t.Skip("TODO")
 }
+
+// Test new routing table methods
+func TestRoutingTable_GetAllContacts(t *testing.T) {
+	rt := newRoutingTable(bits.Rand())
+
+	// Add some contacts
+	contact1 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	contact2 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.2"), Port: 8081}
+	contact3 := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.3"), Port: 8082}
+
+	rt.Update(contact1)
+	rt.Update(contact2)
+	rt.Update(contact3)
+
+	contacts := rt.GetAllContacts()
+	if len(contacts) != 3 {
+		t.Errorf("Expected 3 contacts, got %d", len(contacts))
+	}
+
+	// Verify all contacts are present
+	contactMap := make(map[bits.Bitmap]bool)
+	for _, contact := range contacts {
+		contactMap[contact.ID] = true
+	}
+
+	if !contactMap[contact1.ID] || !contactMap[contact2.ID] || !contactMap[contact3.ID] {
+		t.Error("Not all contacts were returned by GetAllContacts()")
+	}
+}

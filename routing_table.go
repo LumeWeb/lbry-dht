@@ -327,6 +327,18 @@ func (rt *routingTable) Len() int {
 	return len(rt.buckets)
 }
 
+// GetAllContacts returns all contacts from all buckets in the routing table
+func (rt *routingTable) GetAllContacts() []Contact {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+
+	allContacts := make([]Contact, 0) // Initialize as empty slice instead of nil
+	for _, bucket := range rt.buckets {
+		allContacts = append(allContacts, bucket.Contacts()...)
+	}
+	return allContacts
+}
+
 func (rt *routingTable) bucketFor(target bits.Bitmap) *bucket {
 	if rt.id.Equals(target) {
 		panic("routing table does not have a bucket for its own id")

@@ -2,6 +2,7 @@ package dht
 
 import (
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -59,6 +60,145 @@ func TestNodeFinder_FindNodes(t *testing.T) {
 	}
 	if !foundTwo {
 		t.Errorf("did not find second node %s", dhts[1].node.id.Hex())
+	}
+}
+
+// Test new DHT methods
+func TestDHT_GetNode(t *testing.T) {
+	dht := New(nil)
+	// Initialize the DHT to set up internal components
+	dht.node = NewNode(bits.Rand())
+	if dht.GetNode() == nil {
+		t.Error("GetNode() returned nil")
+	}
+}
+
+func TestDHT_GetRoutingTable(t *testing.T) {
+	dht := New(nil)
+	// Initialize the DHT to set up internal components
+	dht.node = NewNode(bits.Rand())
+	if dht.GetRoutingTable() == nil {
+		t.Error("GetRoutingTable() returned nil")
+	}
+}
+
+func TestDHT_GetContacts(t *testing.T) {
+	dht := New(nil)
+	// Initialize the DHT to set up internal components properly
+	nodeID := bits.Rand()
+	dht.contact = Contact{ID: nodeID, IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	dht.node = NewNode(nodeID)
+	// Ensure routing table is properly initialized
+	if dht.node.rt == nil {
+		t.Error("Routing table is nil")
+		return
+	}
+	contacts := dht.GetContacts()
+	// GetContacts should return an empty slice, not nil, when no contacts exist
+	if contacts == nil {
+		t.Error("GetContacts() returned nil, expected empty slice")
+	}
+	if len(contacts) != 0 {
+		t.Errorf("GetContacts() returned %d contacts, expected 0", len(contacts))
+	}
+}
+
+func TestDHT_GetRandomTarget(t *testing.T) {
+	dht := New(nil)
+	target1 := dht.GetRandomTarget()
+	target2 := dht.GetRandomTarget()
+
+	if target1.Equals(target2) {
+		t.Error("GetRandomTarget() returned same value twice")
+	}
+}
+
+func TestDHT_GetDistanceFromTarget(t *testing.T) {
+	// Create proper 96-character hex strings for Bitmap (48 bytes)
+	nodeIDHex := strings.Repeat("01", 48) // 96 characters
+	targetHex := strings.Repeat("00", 48) // 96 characters
+
+	dht := New(&Config{NodeID: nodeIDHex})
+	// Initialize the DHT to set up internal components properly
+	nodeID := bits.FromHexP(nodeIDHex)
+	dht.contact = Contact{ID: nodeID, IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	dht.node = NewNode(nodeID)
+	target := bits.FromHexP(targetHex)
+
+	distance := dht.GetDistanceFromTarget(target)
+	if distance == 0 {
+		t.Error("GetDistanceFromTarget() returned 0 for different values")
+	}
+
+	// Test with same target
+	sameDistance := dht.GetDistanceFromTarget(dht.ID())
+	if sameDistance != 0 {
+		t.Error("GetDistanceFromTarget() should return 0 for same target")
+	}
+}
+
+func TestDHT_FindContacts(t *testing.T) {
+	bs, dhts := TestingCreateNetwork(t, 2, true, false)
+	defer func() {
+		for i := range dhts {
+			dhts[i].Shutdown()
+		}
+		bs.Shutdown()
+	}()
+
+	target := bits.Rand()
+	contacts, _, err := dhts[0].FindContacts(target, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(contacts) == 0 {
+		t.Error("FindContacts() returned no contacts")
+	}
+}
+
+func TestDHT_RemoveBadPeer(t *testing.T) {
+	dht := New(nil)
+	// Initialize the DHT to set up internal components
+	dht.node = NewNode(bits.Rand())
+	contact := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+
+	// This should not panic
+	dht.RemoveBadPeer(contact)
+}
+
+func TestDHT_RemoveBadPeerFromHash(t *testing.T) {
+	dht := New(nil)
+	// Initialize the DHT to set up internal components
+	dht.node = NewNode(bits.Rand())
+	contact := Contact{ID: bits.Rand(), IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	blobHash := bits.Rand()
+
+	// This should not panic
+	dht.RemoveBadPeerFromHash(blobHash, contact)
+}
+
+func TestDHT_ExploreKeyspace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow ExploreKeyspace test")
+	}
+
+	bs, dhts := TestingCreateNetwork(t, 2, true, false)
+	defer func() {
+		for i := range dhts {
+			dhts[i].Shutdown()
+		}
+		bs.Shutdown()
+	}()
+
+	target := bits.Rand()
+	contacts, err := dhts[0].ExploreKeyspaceWithLimit(target, 1) // Use limited version for testing
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(contacts) == 0 {
+		t.Error("ExploreKeyspaceWithLimit() returned no contacts")
 	}
 }
 
