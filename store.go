@@ -7,8 +7,6 @@ import (
 	"go.lumeweb.com/lbry-dht/bits"
 )
 
-// TODO: expire stored data after tExpire time
-
 type contactStore struct {
 	// map of blob hashes to (map of node IDs to bools)
 	hashes map[bits.Bitmap]map[bits.Bitmap]bool
@@ -145,6 +143,11 @@ func (s *contactStore) removeTimestampForContact(blobHash bits.Bitmap, contactID
 // cleanupExpiredForHash removes expired contacts for a specific blob hash
 // This method assumes the lock is already held
 func (s *contactStore) cleanupExpiredForHash(blobHash bits.Bitmap) {
+	// Skip cleanup if expiration is disabled (contactExpire <= 0)
+	if s.contactExpire <= 0 {
+		return
+	}
+
 	idMap, exists := s.hashes[blobHash]
 	if !exists {
 		return

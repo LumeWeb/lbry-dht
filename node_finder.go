@@ -97,9 +97,15 @@ CycleLoop:
 
 	var contacts []Contact
 	var found bool
-	if cf.findValue && len(cf.findValueResult) > 0 {
-		contacts = cf.findValueResult
-		found = true
+	if cf.findValue {
+		cf.findValueMutex.Lock()
+		if len(cf.findValueResult) > 0 {
+			// Make a copy of the slice to avoid race conditions
+			contacts = make([]Contact, len(cf.findValueResult))
+			copy(contacts, cf.findValueResult)
+			found = true
+		}
+		cf.findValueMutex.Unlock()
 	} else {
 		contacts = cf.activeContacts
 		if len(contacts) > bucketSize {
@@ -223,6 +229,7 @@ func (cf *contactFinder) probe(cycleID string) *Contact {
 		return nil
 	}
 
+	var routingContacts []Contact
 	if cf.findValue && res.FindValueKey != "" {
 		cf.debug("|%s| probe %s: got value", cycleID, c.ID.HexShort())
 
@@ -233,13 +240,20 @@ func (cf *contactFinder) probe(cycleID string) *Contact {
 		cf.findValueResult = cf.mergeContacts(cf.findValueResult, validContacts)
 		cf.findValueMutex.Unlock()
 
+		// Use filtered contacts for routing when we have a value response
+		// These contacts claim to have the blob, so we should only route to valid ones
+		routingContacts = validContacts
+
 		// Don't stop immediately - let normal search termination logic handle it
 		// This allows accumulating more contacts from other nodes
+	} else {
+		// For regular node responses, use all contacts for routing
+		routingContacts = res.Contacts
 	}
 
 	cf.debug("|%s| probe %s: got %s", cycleID, c.ID.HexShort(), res.argsDebug())
 	cf.insertIntoActiveList(c)
-	cf.appendNewToShortlist(res.Contacts)
+	cf.appendNewToShortlist(routingContacts)
 
 	cf.activeContactsMutex.Lock()
 	contacts := cf.activeContacts
@@ -252,7 +266,7 @@ func (cf *contactFinder) probe(cycleID string) *Contact {
 	}
 	cf.activeContactsMutex.Unlock()
 
-	return cf.closest(res.Contacts...)
+	return cf.closest(routingContacts...)
 }
 
 // appendNewToShortlist appends any new contacts to the shortlist and sorts it by distance
@@ -305,8 +319,13 @@ func (cf *contactFinder) insertIntoActiveList(contact Contact) {
 
 // isSearchFinished returns true if the search is done and should be stopped
 func (cf *contactFinder) isSearchFinished() bool {
-	if cf.findValue && len(cf.findValueResult) > 0 {
-		return true
+	if cf.findValue {
+		cf.findValueMutex.Lock()
+		hasResults := len(cf.findValueResult) > 0
+		cf.findValueMutex.Unlock()
+		if hasResults {
+			return true
+		}
 	}
 
 	select {

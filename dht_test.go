@@ -495,7 +495,7 @@ func (v *TestContactValidator) ValidateContactForHash(blobHash bits.Bitmap, cont
 	return v.allowedContacts[contact.ID]
 }
 
-func TestGetWithOptions(t *testing.T) {
+func TestApplyContactFiltering(t *testing.T) {
 	// Create a DHT with a validator
 	config := NewStandardConfig()
 	validator := NewTestContactValidator()
@@ -643,15 +643,10 @@ func TestContactValidator_FindValueFiltering(t *testing.T) {
 	validator.AllowContact(contact1)
 	validator.AllowContact(contact3)
 
-	// Store all contacts directly in store (simulating previous storage)
-	node.store.hashes[hash] = map[bits.Bitmap]bool{
-		contact1.ID: true,
-		contact2.ID: true,
-		contact3.ID: true,
-	}
-	node.store.contacts[contact1.ID] = contact1
-	node.store.contacts[contact2.ID] = contact2
-	node.store.contacts[contact3.ID] = contact3
+	// Store all contacts using the public API (simulating previous storage)
+	node.Store(hash, contact1)
+	node.Store(hash, contact2)
+	node.Store(hash, contact3)
 
 	// Test findValue filtering using node's applyContactFiltering method
 	allContacts := node.store.Get(hash)

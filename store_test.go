@@ -143,7 +143,7 @@ func TestContactStore_TimestampResetOnReadd(t *testing.T) {
 	store.lock.RUnlock()
 
 	// Wait a bit to ensure timestamp difference
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Re-add the same contact (should reset timestamp)
 	store.Upsert(hash, contact)
@@ -170,7 +170,7 @@ func TestContactStore_TimestampResetOnReadd(t *testing.T) {
 
 func TestContactStore_Expiration(t *testing.T) {
 	// Use short expiration time for testing
-	shortExpire := 10 * time.Millisecond
+	shortExpire := 100 * time.Millisecond
 	store := newStore(shortExpire)
 
 	contact1 := Contact{ID: bits.Rand(), IP: nil, Port: 8080}
@@ -187,7 +187,7 @@ func TestContactStore_Expiration(t *testing.T) {
 	}
 
 	// Wait for expiration
-	time.Sleep(15 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 
 	// Get should clean up expired contacts
 	contacts := store.Get(hash)
@@ -211,7 +211,7 @@ func TestContactStore_Expiration(t *testing.T) {
 
 func TestContactStore_ExpirationWithReadd(t *testing.T) {
 	// Use short expiration time for testing
-	shortExpire := 10 * time.Millisecond
+	shortExpire := 100 * time.Millisecond
 	store := newStore(shortExpire)
 
 	contact := Contact{ID: bits.Rand(), IP: nil, Port: 8080}
@@ -221,13 +221,13 @@ func TestContactStore_ExpirationWithReadd(t *testing.T) {
 	store.Upsert(hash, contact)
 
 	// Wait for near expiration but not quite
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Re-add contact (should reset timestamp)
 	store.Upsert(hash, contact)
 
 	// Wait past original expiration time
-	time.Sleep(8 * time.Millisecond) // Slightly less than expiration time
+	time.Sleep(80 * time.Millisecond) // Slightly less than expiration time
 
 	// Contact should still exist because timestamp was reset
 	contacts := store.Get(hash)
@@ -236,7 +236,7 @@ func TestContactStore_ExpirationWithReadd(t *testing.T) {
 	}
 
 	// Wait for expiration after re-add
-	time.Sleep(12 * time.Millisecond) // Ensure it expires
+	time.Sleep(120 * time.Millisecond) // Ensure it expires
 
 	// Now it should be expired
 	contacts = store.Get(hash)

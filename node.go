@@ -66,6 +66,10 @@ type Node struct {
 }
 
 // NewNode returns an initialized Node's pointer.
+// ContactExpire behavior:
+// - Zero value: uses default tExpire duration
+// - Positive value: uses the specified duration
+// - Negative value: treated as zero, falls back to default tExpire
 func NewNode(id bits.Bitmap, config *Config) *Node {
 	contactExpire := tExpire // default
 	if config != nil && config.ContactExpire > 0 {
@@ -250,11 +254,16 @@ func (n *Node) handleRequest(addr *net.UDPAddr, request Request) {
 			// Validate before storing if validator is configured
 			if n.validateContactForHash(request.StoreArgs.BlobHash, contact) {
 				n.Store(request.StoreArgs.BlobHash, contact)
-			}
-
-			err := n.sendMessage(addr, Response{ID: request.ID, NodeID: n.id, Data: storeSuccessResponse})
-			if err != nil {
-				log.Error("error sending 'storemethod' response message - ", err)
+				err := n.sendMessage(addr, Response{ID: request.ID, NodeID: n.id, Data: storeSuccessResponse})
+				if err != nil {
+					log.Error("error sending 'storemethod' response message - ", err)
+				}
+			} else {
+				// Send error response when validation fails
+				err := n.sendMessage(addr, Error{ID: request.ID, NodeID: n.id, ExceptionType: "invalid-contact"})
+				if err != nil {
+					log.Error("error sending 'storemethod' error response message - ", err)
+				}
 			}
 		} else {
 			err := n.sendMessage(addr, Error{ID: request.ID, NodeID: n.id, ExceptionType: "invalid-token"})
@@ -300,8 +309,14 @@ func (n *Node) handleRequest(addr *net.UDPAddr, request Request) {
 				}
 			}
 
-			res.FindValueKey = request.Arg.RawString()
-			res.Contacts = validContacts
+			// Only return "value found" if validation didn't prune all contacts
+			if len(validContacts) > 0 {
+				res.FindValueKey = request.Arg.RawString()
+				res.Contacts = validContacts
+			} else {
+				// Validation removed all contacts, fall back to routing table
+				res.Contacts = n.rt.GetClosest(*request.Arg, bucketSize)
+			}
 		} else {
 			res.Contacts = n.rt.GetClosest(*request.Arg, bucketSize)
 		}
@@ -527,16 +542,13 @@ func (n *Node) validateContactForHash(blobHash bits.Bitmap, contact Contact) boo
 
 // applyContactFiltering applies filtering to contacts if a validator is configured
 func (n *Node) applyContactFiltering(hash bits.Bitmap, contacts []Contact) []Contact {
-	if n.conf == nil {
-		return contacts
-	}
-	if n.conf.Validator == nil {
+	if n.conf == nil || n.conf.Validator == nil {
 		return contacts
 	}
 
 	var filteredContacts []Contact
 	for _, contact := range contacts {
-		if n.conf.Validator.ValidateContactForHash(hash, contact) {
+		if n.validateContactForHash(hash, contact) {
 			filteredContacts = append(filteredContacts, contact)
 		}
 	}
