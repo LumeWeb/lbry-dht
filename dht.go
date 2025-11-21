@@ -222,7 +222,7 @@ func (dht *DHT) GetNode() *Node {
 }
 
 // GetRoutingTable returns the internal routing table pointer
-func (dht *DHT) GetRoutingTable() *routingTable {
+func (dht *DHT) GetRoutingTable() RoutingTable {
 	return dht.node.rt
 }
 
