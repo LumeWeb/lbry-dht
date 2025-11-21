@@ -313,7 +313,7 @@ func TestRoutingTable_Load_ID(t *testing.T) {
 	id := "1c8aff71b99462464d9eeac639595ab99664be3482cb91a29d87467515c7d9158fe72aa1f1582dab07d8f8b5db277f41"
 	data := []byte(`{"id": "` + id + `","contacts": []}`)
 
-	rt := routingTable{}
+	rt := newRoutingTable(bits.Bitmap{})
 	err := json.Unmarshal(data, &rt)
 	if err != nil {
 		t.Error(err)

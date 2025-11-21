@@ -82,10 +82,12 @@ func assertContactInStore(t *testing.T, store *contactStore, blobHash bits.Bitma
 }
 
 // assertContactInRoutingTable verifies that a contact exists in the routing table
-func assertContactInRoutingTable(t *testing.T, rt *routingTable, contact Contact, shouldExist bool) {
+func assertContactInRoutingTable(t *testing.T, rt RoutingTable, contact Contact, shouldExist bool) {
+	// Use GetAllContacts() to check if contact exists since we can't access internal buckets
+	allContacts := rt.GetAllContacts()
 	found := false
-	for _, bucket := range rt.buckets {
-		if bucket.Has(contact) {
+	for _, c := range allContacts {
+		if c.Equals(contact, true) {
 			found = true
 			break
 		}

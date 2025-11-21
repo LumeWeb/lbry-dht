@@ -140,13 +140,14 @@ type RpcRoutingTableResponse struct {
 
 func (rpc *rpcReceiver) GetRoutingTable(r *http.Request, args *struct{}, result *RpcRoutingTableResponse) error {
 	result.NodeID = rpc.dht.node.id.String()
-	result.NumBuckets = len(rpc.dht.node.rt.buckets)
-	for _, b := range rpc.dht.node.rt.buckets {
+	bucketRanges := rpc.dht.node.rt.GetBucketRanges()
+	result.NumBuckets = len(bucketRanges)
+	for _, br := range bucketRanges {
 		result.Buckets = append(result.Buckets, RpcBucketResponse{
-			Start:       b.Range.Start.String(),
-			End:         b.Range.End.String(),
-			NumContacts: b.Len(),
-			Contacts:    b.Contacts(),
+			Start:       br.Start.String(),
+			End:         br.End.String(),
+			NumContacts: br.NumContacts,
+			Contacts:    br.Contacts,
 		})
 	}
 	return nil

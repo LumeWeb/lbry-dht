@@ -14,6 +14,42 @@ import (
 	"go.lumeweb.com/lbry-dht/extras/stop"
 )
 
+// RoutingTable defines the interface for routing table operations
+type RoutingTable interface {
+	// Update inserts or refreshes a contact
+	Update(c Contact)
+	// Fresh refreshes a contact if its already in the routing table
+	Fresh(c Contact)
+	// Fail marks a contact as having failed, and removes it if it failed too many times
+	Fail(c Contact)
+	// GetClosest returns the closest `limit` contacts from the routing table
+	GetClosest(target bits.Bitmap, limit int) []Contact
+	// Count returns the number of contacts in the routing table
+	Count() int
+	// Len returns the number of buckets in the routing table
+	Len() int
+	// GetAllContacts returns all contacts from all buckets in the routing table
+	GetAllContacts() []Contact
+	// GetIDsForRefresh returns IDs of buckets that need refreshing
+	GetIDsForRefresh(refreshInterval time.Duration) []bits.Bitmap
+	// BucketInfo returns formatted information about buckets
+	BucketInfo() string
+	// MarshalJSON marshals the routing table to JSON
+	MarshalJSON() ([]byte, error)
+	// UnmarshalJSON unmarshals JSON data into the routing table
+	UnmarshalJSON([]byte) error
+	// GetBucketRanges returns the ranges of all buckets for RPC/debugging purposes
+	GetBucketRanges() []BucketRange
+}
+
+// BucketRange represents the range of a bucket for RPC/debugging
+type BucketRange struct {
+	Start       bits.Bitmap
+	End         bits.Bitmap
+	NumContacts int
+	Contacts    []Contact
+}
+
 // TODO: if routing table is ever empty (aka the node is isolated), it should re-bootstrap
 
 // TODO: use a tree with bucket splitting instead of a fixed bucket list. include jack's optimization (see link in commit mesg)
@@ -442,6 +478,23 @@ func (rt *routingTable) UnmarshalJSON(b []byte) error {
 	}
 
 	return nil
+}
+
+// GetBucketRanges returns the ranges of all buckets for RPC/debugging purposes
+func (rt *routingTable) GetBucketRanges() []BucketRange {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+
+	ranges := make([]BucketRange, len(rt.buckets))
+	for i, b := range rt.buckets {
+		ranges[i] = BucketRange{
+			Start:       b.Range.Start,
+			End:         b.Range.End,
+			NumContacts: b.Len(),
+			Contacts:    b.Contacts(),
+		}
+	}
+	return ranges
 }
 
 // RoutingTableRefresh refreshes any buckets that need to be refreshed

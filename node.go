@@ -51,7 +51,7 @@ type Node struct {
 	transactions map[messageID]*transaction
 
 	// routing table
-	rt *routingTable
+	rt RoutingTable
 	// data store
 	store *contactStore
 
