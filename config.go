@@ -10,7 +10,8 @@ import (
 // ContactValidator defines an interface for validating contacts before storing or returning them
 type ContactValidator interface {
 	// ValidateContactForHash checks if a contact is valid for storing/returning for a specific blob hash
-	ValidateContactForHash(blobHash bits.Bitmap, contact Contact) bool
+	// Returns a pointer to the (possibly modified) contact, or nil if no update needed, and a boolean indicating validity
+	ValidateContactForHash(blobHash bits.Bitmap, contact *Contact) (*Contact, bool)
 }
 
 const (

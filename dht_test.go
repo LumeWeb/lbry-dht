@@ -487,14 +487,17 @@ func (v *TestContactValidator) AllowHash(hash bits.Bitmap) {
 	v.allowedHashes[hash] = true
 }
 
-func (v *TestContactValidator) ValidateContactForHash(blobHash bits.Bitmap, contact Contact) bool {
+func (v *TestContactValidator) ValidateContactForHash(blobHash bits.Bitmap, contact *Contact) (*Contact, bool) {
 	// If hash is not in allowed list, allow all contacts for that hash
 	if !v.allowedHashes[blobHash] {
-		return true
+		return nil, true
 	}
 
 	// If hash is in allowed list, only allow allowed contacts
-	return v.allowedContacts[contact.ID]
+	if v.allowedContacts[contact.ID] {
+		return nil, true
+	}
+	return nil, false
 }
 
 func TestApplyContactFiltering(t *testing.T) {
@@ -585,14 +588,22 @@ func TestContactValidator_StoreValidation(t *testing.T) {
 	}
 
 	// Test validation through validateContactForHash method directly
-	valid1 := node.validateContactForHash(hash, contact1)
-	valid2 := node.validateContactForHash(hash, contact2)
+	validatedContact1, valid1 := node.validateContactForHash(hash, &contact1)
+	validatedContact2, valid2 := node.validateContactForHash(hash, &contact2)
 
 	if !valid1 {
 		t.Error("Contact1 should be valid")
 	}
 	if valid2 {
 		t.Error("Contact2 should be invalid")
+	}
+
+	// Test that no updates are returned (nil means valid but no update)
+	if validatedContact1 != nil {
+		t.Error("Contact1 should not have updates")
+	}
+	if validatedContact2 != nil {
+		t.Error("Contact2 should not have updates")
 	}
 }
 
@@ -618,6 +629,26 @@ func TestContactValidator_NoValidation(t *testing.T) {
 	contacts := node.store.Get(hash)
 	if len(contacts) != 2 {
 		t.Errorf("Expected 2 stored contacts, got %d", len(contacts))
+	}
+
+	// Test validateContactForHash method directly when no validator is configured
+	validatedContact1, valid1 := node.validateContactForHash(hash, &contact1)
+	validatedContact2, valid2 := node.validateContactForHash(hash, &contact2)
+
+	// Both should be valid with no updates when no validator is configured
+	if !valid1 {
+		t.Error("Contact1 should be valid when no validator is configured")
+	}
+	if !valid2 {
+		t.Error("Contact2 should be valid when no validator is configured")
+	}
+
+	// Both should return nil for validatedContact (no updates)
+	if validatedContact1 != nil {
+		t.Error("Contact1 should not have updates when no validator is configured")
+	}
+	if validatedContact2 != nil {
+		t.Error("Contact2 should not have updates when no validator is configured")
 	}
 }
 
