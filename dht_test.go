@@ -630,6 +630,26 @@ func TestContactValidator_NoValidation(t *testing.T) {
 	if len(contacts) != 2 {
 		t.Errorf("Expected 2 stored contacts, got %d", len(contacts))
 	}
+
+	// Test validateContactForHash method directly when no validator is configured
+	validatedContact1, valid1 := node.validateContactForHash(hash, &contact1)
+	validatedContact2, valid2 := node.validateContactForHash(hash, &contact2)
+
+	// Both should be valid with no updates when no validator is configured
+	if !valid1 {
+		t.Error("Contact1 should be valid when no validator is configured")
+	}
+	if !valid2 {
+		t.Error("Contact2 should be valid when no validator is configured")
+	}
+
+	// Both should return nil for validatedContact (no updates)
+	if validatedContact1 != nil {
+		t.Error("Contact1 should not have updates when no validator is configured")
+	}
+	if validatedContact2 != nil {
+		t.Error("Contact2 should not have updates when no validator is configured")
+	}
 }
 
 func TestContactValidator_FindValueFiltering(t *testing.T) {

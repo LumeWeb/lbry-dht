@@ -300,15 +300,11 @@ func (n *Node) handleRequest(addr *net.UDPAddr, request Request) {
 
 		if contacts := n.store.Get(*request.Arg); len(contacts) > 0 {
 			// Filter contacts through validator if configured
-			var validContacts []Contact
-			for _, contact := range contacts {
-				if validatedContact, valid := n.validateContactForHash(*request.Arg, &contact); valid {
-					finalContact := n.getValidatedContact(&contact, validatedContact, valid)
-					validContacts = append(validContacts, *finalContact)
-				} else {
-					// Remove bad contact from store
-					n.store.RemoveContactFromHash(*request.Arg, contact)
-				}
+			validContacts, invalidIndices := n.validateContacts(*request.Arg, contacts)
+
+			// Remove invalid contacts from store
+			for _, invalidIndex := range invalidIndices {
+				n.store.RemoveContactFromHash(*request.Arg, contacts[invalidIndex])
 			}
 
 			// Only return "value found" if validation didn't prune all contacts
@@ -557,18 +553,34 @@ func (n *Node) getValidatedContact(original *Contact, validated *Contact, valid 
 	return original
 }
 
-// applyContactFiltering applies filtering to contacts if a validator is configured
-func (n *Node) applyContactFiltering(hash bits.Bitmap, contacts []Contact) []Contact {
+// validateContacts processes a slice of contacts through validation and returns:
+// - validated contacts that should be kept
+// - indices of contacts that were invalid (for potential pruning)
+func (n *Node) validateContacts(hash bits.Bitmap, contacts []Contact) ([]Contact, []int) {
 	if n.conf == nil || n.conf.Validator == nil {
-		return contacts
+		return contacts, nil
 	}
 
-	var filteredContacts []Contact
-	for _, contact := range contacts {
-		if validatedContact, valid := n.validateContactForHash(hash, &contact); valid {
-			finalContact := n.getValidatedContact(&contact, validatedContact, valid)
-			filteredContacts = append(filteredContacts, *finalContact)
+	var validContacts []Contact
+	var invalidIndices []int
+
+	for i, contact := range contacts {
+		c := contact // copy to avoid range variable address issues
+		if validatedContact, valid := n.validateContactForHash(hash, &c); valid {
+			finalContact := n.getValidatedContact(&c, validatedContact, valid)
+			if finalContact != nil {
+				validContacts = append(validContacts, *finalContact)
+			}
+		} else {
+			invalidIndices = append(invalidIndices, i)
 		}
 	}
-	return filteredContacts
+
+	return validContacts, invalidIndices
+}
+
+// applyContactFiltering applies filtering to contacts if a validator is configured
+func (n *Node) applyContactFiltering(hash bits.Bitmap, contacts []Contact) []Contact {
+	validContacts, _ := n.validateContacts(hash, contacts)
+	return validContacts
 }
